@@ -1,0 +1,132 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: zookeeper
+
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+    restart: unless-stopped
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 24
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  mongodb:
+    image: mongo:7.0
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "--quiet"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  postgresql:
+    image: postgres:16
+    container_name: postgresql
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: transactions
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d transactions"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  producer:
+    build: .
+    container_name: producer
+    command: ["producer"]
+    environment:
+      KAFKA_BROKER: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+  consumer:
+    build: .
+    container_name: consumer
+    command: ["consumer"]
+    environment:
+      KAFKA_BROKER: kafka:9092
+      MONGO_URI: mongodb://mongodb:27017
+      PG_HOST: postgresql
+      PG_PORT: "5432"
+      PG_DB: transactions
+      PG_USER: postgres
+      PG_PASSWORD: postgres
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      postgresql:
+        condition: service_healthy
+    restart: unless-stopped
+
+  streamlit:
+    build: .
+    container_name: streamlit
+    ports:
+      - "8502:8501"
+    environment:
+      MONGO_URI: mongodb://mongodb:27017
+      PG_HOST: postgresql
+      PG_PORT: "5432"
+      PG_DB: transactions
+      PG_USER: postgres
+      PG_PASSWORD: postgres
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      postgresql:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+    entrypoint: []
+    command: >
+      streamlit run src/dashboard.py
+      --server.port=8501
+      --server.address=0.0.0.0
+      --server.headless=true
+    restart: unless-stopped
