@@ -66,7 +66,7 @@ graph LR
 **Prerequisites:** Docker Desktop
 
 ```bash
-git clone https://github.com/rawda-developer/real-time-streaming-analytics.git
+git clone https://github.com/Rawdamm/real-time-streaming-analytics.git
 cd real-time-streaming-analytics
 docker-compose up -d
 ```
